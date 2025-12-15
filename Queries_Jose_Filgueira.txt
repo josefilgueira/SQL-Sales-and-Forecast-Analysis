@@ -1,0 +1,119 @@
+SELECT * FROM ACCOUNTS;
+SELECT * FROM SALES;
+SELECT * FROM FORECASTS;
+
+--1. Análisis de Ventas y Beneficio por Categoría de Producto para Adabs Entertainment en 2020
+-- Analiza las ventas y el beneficio total por categoría de producto solo para los datos de la cuenta Adabs Entertainment durante el año 2020.
+SELECT CATEGORY, CONCAT(SUM(TOTAL),' (100%)') AS "VENTAS TOTALES (%)",
+       -- CALCULA EL PORCENTAJE RESPECTO A LAS VENTAS TOTALES
+       CONCAT(SUM(MAINTENANCE),' (', ROUND(SUM(MAINTENANCE)/SUM(TOTAL) * 100, 2),'%)')AS "VENTAS MANTENIMIENTO (%)", 
+       CONCAT(SUM(PRODUCT),' (', ROUND(SUM(PRODUCT)/SUM(TOTAL) * 100, 2),'%)')AS "VENTAS PRODUCTO (%)",
+       CONCAT(SUM(PARTS),' (', ROUND(SUM(PARTS)/SUM(TOTAL) * 100, 2),'%)')AS "VENTAS_PARTES (%)",
+       CONCAT(SUM(SUPPORT),' (', ROUND(SUM(SUPPORT)/SUM(TOTAL) * 100, 2),'%)')AS "VENTAS_SOPORTE (%)",
+       SUM(UNITS_SOLD) AS "UNIDADES VENDIDAS",
+       SUM(PROFIT) AS BENEFICIO
+FROM SALES
+WHERE ACCOUNT = 'Adabs Entertainment' AND YEAR = 2020
+GROUP BY CATEGORY;
+
+
+--2. Comparación de Ventas, Unidades Vendidas y Beneficio entre Industrias en las Regiones APAC y EMEA
+-- Compara el rendimiento de ventas entre diferentes industrias en los países de las regiones APAC y EMEA. Debes calcular agrupando para industria y país.
+SELECT INDUSTRY AS INDUSTRIA, COUNTRY AS "PAÍS", SUM(TOTAL) AS "INGRESO TOTAL",
+       SUM(UNITS_SOLD) AS "UNIDADES VENDIDAS", SUM(PROFIT) AS "BENEFICIO TOTAL", 
+       ROUND(AVG(PROFIT),2) AS "BENEFICIO PROMEDIO", 
+       ROUND(SUM(PROFIT) / SUM(UNITS_SOLD), 2) AS "BENEFICIO POR UNIDAD"
+FROM ACCOUNTS AS A INNER JOIN SALES AS S 
+ON A.ACCOUNT = S.ACCOUNT
+WHERE REGION IN('APAC','EMEA')
+GROUP BY 1,2
+ORDER BY 3 DESC;
+
+--3. Clasificación de Beneficio por Tipo de Empresa
+--Enunciado: Calcula el beneficio total por industria y clasifícalo como "Alto" o "Normal" en función de si supera o no los $1,000,000. Hazlo solo para los datos de las cuentas cuyo pronóstico total de beneficios en el año 2022 sea superior a $500,000.
+
+SELECT INDUSTRY, SUM(PROFIT) AS BENEFICIO,
+       CASE
+            WHEN SUM(PROFIT) > 1000000 THEN 'Alto'
+            ELSE 'Normal'
+       END AS CLASIFICACION
+FROM ACCOUNTS AS A INNER JOIN SALES AS S
+ON A.ACCOUNT = S.ACCOUNT
+WHERE A.ACCOUNT IN(SELECT ACCOUNT
+                   FROM FORECASTS
+                   GROUP BY ACCOUNT
+                   HAVING SUM(FORECAST) > 500000)
+GROUP BY INDUSTRY
+ORDER BY 2 DESC;
+
+--4. Comparación de Beneficios para Diferentes Años
+--Enunciado: Calcula el pronóstico de beneficio para el año 2022 y el beneficio real para el primer trimestre de 2020 y el tercer trimestre de 2021, agrupando los resultados por categoría de producto. Además, queremos identificar la oportunidad más antigua y la más reciente dentro de cada categoría.
+
+
+SELECT COALESCE(S.CATEGORY, F.CATEGORY) AS CATEGORIA,
+       SUM (S.PROFIT) AS "BENEFICIO TOTAL", 
+       SUM(F.FORECAST) AS "PREVISIÓN BENEFICIO",
+       MAX(OPPORTUNITY_AGE) AS "OP. ANTIGUA", 
+       MIN(OPPORTUNITY_AGE) AS "OP. RECIENTE"    
+FROM SALES AS S FULL OUTER JOIN FORECASTS AS F
+ON S.CATEGORY = F.CATEGORY AND S.YEAR = F.YEAR
+WHERE QUARTER IN('2020 Q1', '2021 Q3') OR F.YEAR = 2022
+GROUP BY 1;
+
+
+--5. Cálculo del Beneficio Acumulado por Trimestre y por Industria
+--Enunciado: Calcula el beneficio acumulado por trimestre para cada industria, tanto el beneficio real como el pronosticado. Además, muestra el beneficio total y promedio también por trimestre e industria junto con los valores acumulados.
+
+SELECT CS.INDUSTRY,
+       CS.QUARTER,
+       SUM(CS.BENEFICIO_TOTAL) AS BENEFICIO_TRIMESTRE,
+       SUM(SUM(CS.BENEFICIO_TOTAL)) OVER (PARTITION BY CS.INDUSTRY ORDER BY CS.QUARTER) AS BENEFICIO_ACUMULADO,
+       SUM(SUM(CF.PREVISION_TOTAL)) OVER (PARTITION BY CS.INDUSTRY) AS PREVISION_ACUMULADA
+FROM (SELECT S.ACCOUNT,
+             A.INDUSTRY,
+             S.QUARTER,
+             SUM(S.PROFIT) AS BENEFICIO_TOTAL
+      FROM SALES AS S
+      JOIN ACCOUNTS AS A ON S.ACCOUNT = A.ACCOUNT
+      GROUP BY 1,2,3) AS CS
+INNER JOIN
+     (SELECT F.ACCOUNT,
+             A.INDUSTRY,
+             SUM(F.FORECAST) AS PREVISION_TOTAL
+      FROM FORECASTS AS F 
+      JOIN ACCOUNTS AS A 
+      ON F.ACCOUNT = A.ACCOUNT
+      GROUP BY 1,2) AS CF
+ON CS.ACCOUNT = CF.ACCOUNT
+GROUP BY 1,2
+ORDER BY 1,2;
+
+          
+-- CASO PRÁCTICO
+-- La empresa SmartDesk quiere obtener un pronóstico aproximado de ingresos para el año 2022. Suponiendo que los datos de clasificación del pronóstico “Pipeline”, “Upside” y “Commit” tienen una probabilidad estimada del 30%, 60% y 90%, respectivamente. ¿Cúal sería el pronostico de ventas aproximado para el 2022? ¿Tendríamos un beneficio mayor a los años anteriores?¿Qué industria genera el mayor pronóstico?
+--¿Cúal sería el pronostico de ventas aproximado para el 2022?
+SELECT SUM(CASE
+       WHEN PREDICTION_CATEGORY = 'Pipeline' THEN FORECAST * 0.3
+       WHEN PREDICTION_CATEGORY = 'Upside' THEN FORECAST * 0.6
+       WHEN PREDICTION_CATEGORY = 'Commit' THEN FORECAST * 0.9
+       END) AS "PRONÓSTICO APROXIMADO"
+FROM FORECASTS;
+
+--¿Tendríamos un beneficio mayor a los años anteriores?
+SELECT YEAR, SUM(PROFIT) as BENEFICIO_TOTAL
+FROM SALES
+GROUP BY YEAR
+ORDER BY YEAR;
+
+--¿Qué industria genera el mayor pronóstico?
+SELECT INDUSTRY, 
+       SUM(CASE
+       WHEN PREDICTION_CATEGORY = 'Pipeline' THEN FORECAST * 0.3
+       WHEN PREDICTION_CATEGORY = 'Upside' THEN FORECAST * 0.6
+       WHEN PREDICTION_CATEGORY = 'Commit' THEN FORECAST * 0.9
+       END) AS "PRONÓSTICO APROXIMADO"
+FROM ACCOUNTS AS A 
+INNER JOIN FORECASTS AS F 
+ON A.ACCOUNT = F.ACCOUNT
+GROUP BY 1
+ORDER BY 2 DESC;
